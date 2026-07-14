@@ -20,25 +20,120 @@ except ImportError:
     REPORTLAB_AVAILABLE = False
 
 
-def generate_pdf_bytes(df: pd.DataFrame, title: str = "BOMIQ — Final BOM") -> bytes:
+def generate_pdf_bytes(
+        df: pd.DataFrame,
+        dashboard: dict,
+        distributor: str = "DigiKey",
+        title: str = "BOMIQ — Final Procurement BOM"
+    ) -> bytes:
     """Render a dataframe as a landscape PDF table and return raw bytes."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=landscape(A4),
-        leftMargin=18, rightMargin=18, topMargin=18, bottomMargin=18
+        leftMargin=8,
+        rightMargin=8,
+        topMargin=10,
+        bottomMargin=10
     )
-    styles = getSampleStyleSheet()
-    elements = [Paragraph(f"<b>{title}</b>", styles["Title"]), Spacer(1, 10)]
+    from datetime import datetime
 
-    table_data = [list(df.columns)] + df.astype(str).values.tolist()
-    table = Table(table_data, repeatRows=1)
+    styles = getSampleStyleSheet()
+
+    elements = []
+
+    elements.append(
+        Paragraph(
+            "<font size=20><b>BOMIQ</b></font>",
+            styles["Title"]
+        )
+    )
+
+    elements.append(
+        Paragraph(
+            "<font size=14><b>Final Procurement BOM Report</b></font>",
+            styles["Heading2"]
+        )
+    )
+
+    elements.append(Spacer(1, 12))
+
+    report_info = f"""
+    <b>Generated :</b> {datetime.now().strftime('%d %b %Y %I:%M %p')}<br/>
+    <b>Distributor :</b> {distributor}<br/>
+    <b>Total Components :</b> {dashboard['Total Parts']}<br/>
+    <b>Components Found :</b> {dashboard['Found']}<br/>
+    <b>Automation :</b> {dashboard['Automation']}%<br/>
+    <b>Total BOM Cost :</b> ₹{dashboard['Actual Cost']:,.2f}
+    """
+
+    elements.append(
+        Paragraph(
+            report_info,
+            styles["Normal"]
+        )
+    )
+
+    elements.append(Spacer(1, 20))
+
+    if dashboard.get("Target Cost") is not None:
+
+        comparison = f"""
+        <b>Target Cost :</b> ₹{dashboard['Target Cost']:,.2f}<br/>
+        <b>Difference :</b> ₹{dashboard['Difference']:,.2f}<br/>
+        <b>Difference % :</b> {dashboard['Difference %']:.2f}%
+        """
+
+        elements.append(
+            Paragraph(
+                comparison,
+                styles["Normal"]
+            )
+        )
+
+        elements.append(Spacer(1, 16))
+
+    # Columns that don't make sense in a PDF
+    columns_to_remove = [
+        "Product URL",
+        "Remarks"
+    ]
+
+    pdf_df = df.drop(
+        columns=[c for c in columns_to_remove if c in df.columns],
+        errors="ignore"
+    )
+
+    table_data = [list(pdf_df.columns)] + pdf_df.astype(str).values.tolist()
+    page_width = landscape(A4)[0] - 16
+
+    col_widths = [
+        page_width * 0.06,   # Designator
+        page_width * 0.08,   # Part Type
+        page_width * 0.06,   # Value
+        page_width * 0.12,   # Manufacturer
+        page_width * 0.16,   # Manufacturer Part Number
+        page_width * 0.16,   # DigiKey Part Number
+        page_width * 0.08,   # Stock
+        page_width * 0.07,   # Unit Price
+        page_width * 0.08,   # Total Cost
+        page_width * 0.07,   # Validation
+        page_width * 0.06    # Status
+    ]
+
+    table = Table(
+        table_data,
+        repeatRows=1,
+        colWidths=col_widths
+    )
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3B82F6")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTSIZE", (0, 0), (-1, -1), 6.5),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
-        ("TOPPADDING", (0, 0), (-1, 0), 6),
+        ("FONTSIZE", (0,0), (-1,-1), 5.8),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 2),
+        ("TOPPADDING", (0,0), (-1,-1), 2),
+        ("LEFTPADDING", (0,0), (-1,-1), 2),
+        ("RIGHTPADDING", (0,0), (-1,-1), 2),
         ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CCCCCC")),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F1F5F9")]),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -1302,14 +1397,12 @@ if st.session_state.search_results is not None:
 
     with exp3:
         if REPORTLAB_AVAILABLE:
-            pdf_data = generate_pdf_bytes(details_df, title="BOMIQ — Final BOM")
-            st.download_button(
-                label="🧾  PDF",
-                data=pdf_data,
-                file_name="Final_BOM.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
+            pdf_data = generate_pdf_bytes(
+            details_df,
+            dashboard=dashboard,
+            distributor=distributor,
+            title="BOMIQ — Final Procurement BOM"
+        )
         else:
             st.button("🧾  PDF (needs `reportlab`)", disabled=True, use_container_width=True)
             st.caption("Run `pip install reportlab` to enable PDF export.")
