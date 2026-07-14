@@ -63,9 +63,24 @@ def generate_pdf_bytes(
     <b>Distributor :</b> {distributor}<br/>
     <b>Total Components :</b> {dashboard['Total Parts']}<br/>
     <b>Components Found :</b> {dashboard['Found']}<br/>
-    <b>Automation :</b> {dashboard['Automation']}%<br/>
-    <b>Total BOM Cost :</b> ₹{dashboard['Actual Cost']:,.2f}
+    <b>Partial Matches :</b> {dashboard['Partially Matched']}<br/>
+    <b>Few Parameter Matches :</b> {dashboard['Few Parameters Matched']}<br/>
+    <b>Not Found :</b> {dashboard['Not Found']}<br/>
+    <b>Automation :</b> {dashboard['Automation']}%<br/><br/>
     """
+    if dashboard.get("Target Cost") is None:
+
+        report_info += f"""
+        <b>Final BOM Cost :</b> INR{dashboard['Actual Cost']:,.2f}
+        """
+
+    else:
+
+        report_info += f"""
+        <b>Target Cost :</b> INR{dashboard['Target Cost']:,.2f}<br/>
+        <b>Actual Cost :</b> INR{dashboard['Actual Cost']:,.2f}<br/>
+        <b>Difference % :</b> {dashboard['Difference %']:.2f}%
+        """
 
     elements.append(
         Paragraph(
@@ -76,49 +91,68 @@ def generate_pdf_bytes(
 
     elements.append(Spacer(1, 20))
 
-    if dashboard.get("Target Cost") is not None:
-
-        comparison = f"""
-        <b>Target Cost :</b> ₹{dashboard['Target Cost']:,.2f}<br/>
-        <b>Difference :</b> ₹{dashboard['Difference']:,.2f}<br/>
-        <b>Difference % :</b> {dashboard['Difference %']:.2f}%
-        """
-
-        elements.append(
-            Paragraph(
-                comparison,
-                styles["Normal"]
-            )
-        )
-
-        elements.append(Spacer(1, 16))
-
     # Columns that don't make sense in a PDF
-    columns_to_remove = [
-        "Product URL",
-        "Remarks"
+    pdf_columns = [
+        "Designator",
+        "Part Type",
+        "Value",
+        "Manufacturer",
+        "Manufacturer Part Number",
+        "DigiKey Part Number",
+        "Quantity",
+        "Unit Price",
+        "Total Cost"
     ]
 
-    pdf_df = df.drop(
-        columns=[c for c in columns_to_remove if c in df.columns],
-        errors="ignore"
+    pdf_df = df[
+        [c for c in pdf_columns if c in df.columns]
+    ].copy()
+
+    pdf_df.rename(
+        columns={
+            "Designator": "Ref",
+            "Manufacturer Part Number": "Manufacturer PN",
+            "DigiKey Part Number": "DigiKey PN",
+            "Unit Price": "Unit Price (INR)",
+            "Total Cost": "Total (INR)",
+            "Quantity": "Qty"
+        },
+        inplace=True
+    )
+    pdf_df.insert(
+        0,
+        "S.No",
+        range(1, len(pdf_df) + 1)
     )
 
-    table_data = [list(pdf_df.columns)] + pdf_df.astype(str).values.tolist()
-    page_width = landscape(A4)[0] - 16
+    table_data = [
+        list(pdf_df.columns)
+    ] + pdf_df.fillna("").astype(str).values.tolist()
+
+
+    page_width = landscape(A4)[0] - 20
 
     col_widths = [
-        page_width * 0.06,   # Designator
-        page_width * 0.08,   # Part Type
-        page_width * 0.06,   # Value
-        page_width * 0.12,   # Manufacturer
-        page_width * 0.16,   # Manufacturer Part Number
-        page_width * 0.16,   # DigiKey Part Number
-        page_width * 0.08,   # Stock
-        page_width * 0.07,   # Unit Price
-        page_width * 0.08,   # Total Cost
-        page_width * 0.07,   # Validation
-        page_width * 0.06    # Status
+
+        page_width * 0.03,   # S.No
+
+        page_width * 0.07,   # Ref
+
+        page_width * 0.12,   # Part Type
+
+        page_width * 0.08,   # Value
+
+        page_width * 0.16,   # Manufacturer
+
+        page_width * 0.19,   # Manufacturer PN
+
+        page_width * 0.18,   # DigiKey PN
+
+        page_width * 0.02,   # Qty
+
+        page_width * 0.06,   # Unit Price
+
+        page_width * 0.04    # Total
     ]
 
     table = Table(
@@ -165,7 +199,7 @@ if "search_results" not in st.session_state:
     st.session_state.search_results = None
 
 if "target_cost" not in st.session_state:
-    st.session_state.target_cost = 0.0
+    st.session_state.target_cost = None
 
 if "enable_cost_comparison" not in st.session_state:
     st.session_state.enable_cost_comparison = False
@@ -847,20 +881,61 @@ if st.session_state.engineering_bom is not None:
 
         st.session_state.enable_cost_comparison = True
 
-        st.number_input(
-            "Enter Target BOM Cost (₹)",
-            min_value=1.0,
-            value=max(1.0, st.session_state.target_cost),
-            step=1.0,
-            format="%.2f",
-            label_visibility="collapsed",
-            disabled=st.session_state.search_completed
-        )
+        rupee_col, input_col = st.columns([0.08, 0.92])
+
+        with rupee_col:
+            st.markdown(
+                """
+                <div style="
+                    margin-top:8px;
+                    font-size:24px;
+                    font-weight:700;
+                    text-align:center;
+                ">
+                INR
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+        with input_col:
+
+            target_cost_text = st.text_input(
+                "Target BOM Cost",
+                value=(
+                    ""
+                    if st.session_state.target_cost is None
+                    else str(st.session_state.target_cost)
+                ),
+                placeholder="Enter target BOM cost",
+                label_visibility="collapsed",
+                disabled=st.session_state.search_completed
+            )
+
+        if target_cost_text.strip():
+
+            try:
+
+                clean_value = (
+                    target_cost_text
+                    .replace("INR", "")
+                    .replace(",", "")
+                    .strip()
+                )
+
+                st.session_state.target_cost = float(clean_value)
+
+            except ValueError:
+
+                st.error("Please enter a valid number.")
+
+        else:
+
+            st.session_state.target_cost = None
 
     else:
 
         st.session_state.enable_cost_comparison = False
-        st.session_state.target_cost = None
 
     st.write("")
 
@@ -908,6 +983,13 @@ if st.session_state.engineering_bom is not None:
 
                 API_STATS["status"] = "Connecting"
                 API_STATS["connected"] = False
+
+                if (
+                    st.session_state.enable_cost_comparison
+                    and st.session_state.target_cost is None
+                ):
+                    st.error("Please enter a target BOM cost.")
+                    st.stop()
 
                 st.session_state.search_results = search_bom(
 
@@ -970,7 +1052,7 @@ if st.session_state.search_results is not None:
                 kpi_card(
                     "target",
                     "Target Cost",
-                    f"₹{dashboard['Target Cost']:,.2f}",
+                    f"INR{dashboard['Target Cost']:,.2f}",
                     "blue"
                 )
             )
@@ -980,7 +1062,7 @@ if st.session_state.search_results is not None:
                 kpi_card(
                     "chart",
                     "Actual Cost",
-                    f"₹{dashboard['Actual Cost']:,.2f}",
+                    f"INR{dashboard['Actual Cost']:,.2f}",
                     "emerald"
                 )
             )
@@ -997,7 +1079,7 @@ if st.session_state.search_results is not None:
                 kpi_card(
                     "chart",
                     "Difference",
-                    f"₹{dashboard['Difference']:,.2f}",
+                    f"INR{dashboard['Difference']:,.2f}",
                     diff_accent
                 )
             )
@@ -1018,7 +1100,7 @@ if st.session_state.search_results is not None:
             kpi_card(
                 "money",
                 "Final BOM Cost",
-                f"₹{dashboard['Actual Cost']:,.2f}",
+                f"INR{dashboard['Actual Cost']:,.2f}",
                 "emerald"
             )
         )
@@ -1246,7 +1328,7 @@ if st.session_state.search_results is not None:
     )
 
     summary_df["Unit Price"] = summary_df["Unit Price"].apply(
-        lambda x: f"₹{x * USD_TO_INR:,.2f}" if pd.notna(x) else ""
+        lambda x: f"INR{x * USD_TO_INR:,.2f}" if pd.notna(x) else ""
     )
 
     # --------------------------------------------------
