@@ -1396,16 +1396,35 @@ if st.session_state.search_results is not None:
         )
 
     with exp3:
+
         if REPORTLAB_AVAILABLE:
+
             pdf_data = generate_pdf_bytes(
-            details_df,
-            dashboard=dashboard,
-            distributor=distributor,
-            title="BOMIQ — Final Procurement BOM"
-        )
+                details_df,
+                dashboard=dashboard,
+                distributor=distributor,
+                title="BOMIQ — Final Procurement BOM"
+            )
+
+            st.download_button(
+                label="🧾  PDF",
+                data=pdf_data,
+                file_name="Final_BOM.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+
         else:
-            st.button("🧾  PDF (needs `reportlab`)", disabled=True, use_container_width=True)
-            st.caption("Run `pip install reportlab` to enable PDF export.")
+
+            st.button(
+                "🧾 PDF (needs reportlab)",
+                disabled=True,
+                use_container_width=True
+            )
+
+            st.caption(
+                "Run `pip install reportlab` to enable PDF export."
+            )
 
     # ==========================================================
     # SEARCH STATISTICS
