@@ -314,20 +314,20 @@ header[data-testid="stHeader"] {background: transparent;}
 /* ---------- App navbar (top header) — neon enterprise style ---------- */
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;800&display=swap');
 
-.bomiq-navbar {
-    position: sticky; top: 0; z-index: 999;
-    padding: 22px 30px 18px 30px; margin-bottom: 22px;
-    background: linear-gradient(180deg, #0C0F18 0%, #070911 100%);
-    border: 1px solid rgba(59,130,246,0.25);
-    border-bottom: 2px solid rgba(59,130,246,0.55);
-    border-radius: 16px;
-    box-shadow: 0 6px 30px rgba(59,130,246,0.18), inset 0 -18px 30px -20px rgba(59,130,246,0.25);
+.bomiq-navbar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
 }
 .navbar-top-row {
     display: flex; align-items: center; justify-content: space-between;
     gap: 20px; flex-wrap: wrap;
 }
-.navbar-brand { display: flex; align-items: center; gap: 16px; }
+.navbar-brand{
+    display:flex;
+    align-items:flex-start;
+    gap:18px;
+}
 .navbar-logo {
     width: 54px; height: 54px; border-radius: 14px; flex-shrink: 0;
     background: radial-gradient(circle, rgba(59,130,246,0.22), rgba(59,130,246,0.05));
@@ -335,10 +335,10 @@ header[data-testid="stHeader"] {background: transparent;}
     border: 1px solid rgba(59,130,246,0.4);
     box-shadow: 0 0 26px var(--blue-glow);
 }
-.navbar-logo svg { width: 30px; height: 30px; }
+.navbar-logo svg { width: 40px; height: 40px; }
 .navbar-title {
     font-family: 'Orbitron', 'Inter', sans-serif;
-    font-size: 32px; font-weight: 800; line-height: 1;
+    font-size: 40px; font-weight: 800; line-height: 1;
     color: #7FD4FF; letter-spacing: 1px;
     text-shadow: 0 0 10px rgba(59,130,246,0.85), 0 0 34px rgba(59,130,246,0.45);
     margin: 0;
@@ -354,9 +354,10 @@ header[data-testid="stHeader"] {background: transparent;}
 .navbar-context b { color: var(--blue); font-weight: 800; }
 .navbar-context .sep { color: var(--border); margin: 0 8px; }
 
-.navbar-apps-row {
-    display: flex; align-items: center; justify-content: flex-end;
-    gap: 8px; flex-wrap: wrap; margin-top: 14px;
+.navbar-apps-row{
+    display:flex;
+    gap:12px;
+    margin-top:18px;
 }
 .navbar-app {
     display: flex; align-items: center; gap: 7px;
@@ -374,6 +375,22 @@ header[data-testid="stHeader"] {background: transparent;}
     color: var(--text-dim); border: 1px dashed var(--border);
 }
 .navbar-app.ghost:hover { color: var(--text); border-color: var(--blue); }
+            
+.navbar-left{
+    flex:1;
+}
+
+.navbar-right{
+    width:180px;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+}
+
+.company-logo{
+    height:90px;
+    object-fit:contain;
+}
 
 /* ---------- Section headers ---------- */
 .section-head { display:flex; align-items:center; gap:10px; margin: 22px 0 10px 0; }
@@ -383,7 +400,7 @@ header[data-testid="stHeader"] {background: transparent;}
     display:flex; align-items:center; justify-content:center; color: var(--blue);
 }
 .section-head h3 { margin:0; font-size: 16.5px; font-weight: 700; color: var(--text); }
-.section-sub { color: var(--text-dim); font-size: 12.8px; margin: -2px 0 14px 40px; }
+.section-sub { color: var(--text-dim); font-size: 15px; margin: -2px 0 14px 40px; }
 
 /* ---------- Stepper ---------- */
 .stepper { display:flex; align-items:center; width:100%; margin: 4px 0 26px 0; }
@@ -491,7 +508,6 @@ def section_head(icon_name, title, subtitle=None):
     render_html(f"""
     <div class="bomiq-section">
       <div class="section-head">
-        <div class="icon-chip">{icon(icon_name)}</div>
         <h3>{title}</h3>
       </div>
       {f'<div class="section-sub">{subtitle}</div>' if subtitle else ''}
@@ -677,22 +693,41 @@ update_api_panel()
 
 render_html(f"""
 <div class="bomiq-navbar">
-    <div class="navbar-top-row">
+
+    <div class="navbar-left">
+
         <div class="navbar-brand">
             <div class="navbar-logo">{icon('logo')}</div>
+
             <div>
                 <div class="navbar-title">BOMIQ</div>
-                <div class="navbar-tagline">Smart BOM Intelligence Platform</div>
+                <div class="navbar-tagline">SMART BOM PLATFORM</div>
+
+                <div class="navbar-apps-row">
+                    <div class="navbar-app active">
+                        {icon('cpu')} BOM Automation
+                    </div>
+
+                    <div class="navbar-app ghost">
+                        + Add App
+                    </div>
+                </div>
+
             </div>
+
         </div>
-        <div class="navbar-context">
-            <b>BOM Automation</b><span class="sep">·</span>Sourcing &amp; Validation<span class="sep">·</span>DigiKey Backend
-        </div>
+
     </div>
-    <div class="navbar-apps-row">
-        <div class="navbar-app active">{icon('cpu')} BOM Automation</div>
-        <div class="navbar-app ghost">+ Add App</div>
+
+    <div class="navbar-right">
+
+        <img
+            src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/57/Havells_Logo.svg/1280px-Havells_Logo.svg.png"
+            class="company-logo"
+        >
+
     </div>
+
 </div>
 """)
 
