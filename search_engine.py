@@ -178,14 +178,6 @@ def find_best_component(row):
 
     query = create_search_query(row)
 
-    # ---------------- DEBUG ----------------
-    print("=" * 80)
-    print("ROW:")
-    print(row.to_dict())
-    print("SEARCH QUERY:", query)
-    print("=" * 80)
-    # ---------------------------------------
-
     queries = []
 
     if query:
@@ -228,42 +220,32 @@ def find_best_component(row):
 
     for q in queries:
 
-        print("\n" + "="*60)
-        print("Searching:", q)
 
         response = search_keyword(q)
 
         products = parse_products(response)
 
-        print("Products Returned:", len(products))
 
         if not products:
             continue
 
         for product in products:
 
-            print("--------------------------------")
-            print("MPN:", product["Manufacturer Part Number"])
 
             result = score_candidate(row, product)
 
-            print("Score:", result["Score"])
-            print("Matched:", result["Matched"])
-            print("Mismatched:", result["Mismatched"])
+
 
             product["Validation"] = result
 
             if result["Score"] == 100:
 
-                print(">>>> PERFECT MATCH <<<<")
                 return product
 
             if result["Score"] > best_score:
 
                 best_score = result["Score"]
                 best_product = product
-
-        print("Best Score after this query:", best_score)
 
         if best_score >= 95:
 
@@ -298,6 +280,28 @@ def find_best_component(row):
 
 def process_row(row):
 
+    if row.get("Skip Search", False):
+
+        skipped = row.to_dict()
+
+        skipped.update({
+        "Manufacturer": "",
+        "Manufacturer Part Number": "",
+        "DigiKey Part Number": "",
+        "Description": "",
+        "Product URL": "",
+        "Unit Price": 0.0,
+        "Total Cost": 0.0,
+        "Stock": 0,
+        "Validation Score": -1,
+        "Matched": "",
+        "Mismatched": "",
+        "Status": "Skipped",
+        "Datasheet": "",
+        })
+
+        return skipped
+
     result = find_best_component(row)
 
     row_dict = row.to_dict()
@@ -316,6 +320,7 @@ def process_row(row):
         row_dict["Matched"] = ", ".join(result["Validation"]["Matched"])
         row_dict["Mismatched"] = ", ".join(result["Validation"]["Mismatched"])
         row_dict["Status"] = result["Validation"]["Status"]
+        row_dict["Datasheet"] = result.get("Datasheet", "")
 
     else:
 
@@ -323,13 +328,14 @@ def process_row(row):
         row_dict["Manufacturer Part Number"] = ""
         row_dict["DigiKey Part Number"] = ""
         row_dict["Description"] = ""
-        row_dict["Stock"] = ""
-        row_dict["Unit Price"] = ""
+        row_dict["Stock"] = 0
+        row_dict["Unit Price"] = 0.0
         row_dict["Product URL"] = ""
         row_dict["Validation Score"] = 0
         row_dict["Matched"] = ""
         row_dict["Mismatched"] = ""
         row_dict["Status"] = "Not Found"
+        row_dict["Datasheet"] = ""
 
     return row_dict
 
@@ -388,10 +394,23 @@ def search_bom(df, target_cost=0,progress_bar=None, status_text=None,api_callbac
 
     details_df = pd.DataFrame(final_rows)
 
+    details_df["Stock"] = pd.to_numeric(
+        details_df["Stock"],
+        errors="coerce"
+    ).fillna(0).astype(int)
+
+    details_df["Unit Price"] = pd.to_numeric(
+        details_df["Unit Price"],
+        errors="coerce"
+    ).fillna(0.0)
+
+
     details_df["Total Cost"] = (
         details_df["Quantity"].astype(float) *
         details_df["Unit Price"].astype(float)
     )
+
+
 
     USD_TO_INR = 95.38
 
@@ -418,6 +437,12 @@ def search_bom(df, target_cost=0,progress_bar=None, status_text=None,api_callbac
     # Add Status if available
     if "Status" in details_df.columns:
         summary_df["Status"] = details_df["Status"]
+    
+    skipped_count = len(
+        details_df[
+            details_df["Status"] == "Skipped"
+        ]
+    )
 
     dashboard = {
     "Total Parts": len(details_df),
@@ -442,17 +467,19 @@ def search_bom(df, target_cost=0,progress_bar=None, status_text=None,api_callbac
         ]
     ),
 
-    "Not Found": len(
+    "Not Found / Skipped": len(
         details_df[
-            details_df["Validation Score"] == 0
+            (details_df["Validation Score"] == 0) |
+            (details_df["Status"] == "Skipped")
         ]
     )
     }
+    searched_parts = dashboard["Total Parts"] - skipped_count
 
     dashboard["Automation"] = round(
-        dashboard["Found"] / dashboard["Total Parts"] * 100,
+        dashboard["Found"] / searched_parts * 100,
         1
-    )
+    ) if searched_parts > 0 else 0
 
     dashboard["Actual Cost"] = round(actual_cost, 2)
 

@@ -63,7 +63,7 @@ def get_access_token():
         }
 
 
-        print(">>> Requesting OAuth token")
+
 
         response = SESSION.post(
             url,
@@ -71,7 +71,7 @@ def get_access_token():
             headers=headers,
             timeout=30
         )
-        print(">>> OAuth token received")
+
 
         response.raise_for_status()
 
@@ -171,13 +171,11 @@ def search_keyword(keyword):
 
         except requests.exceptions.Timeout:
 
-            print(f"Timeout ({attempt+1}/3): {keyword}")
 
             time.sleep(1)
 
         except requests.exceptions.ConnectionError:
 
-            print(f"Connection Error ({attempt+1}/3): {keyword}")
 
             time.sleep(1)
 
@@ -191,20 +189,18 @@ def search_keyword(keyword):
 
                 wait = int(retry_after) if retry_after else (2 ** attempt)
 
-                print(f"429 Rate Limited. Waiting {wait}s")
+
 
                 time.sleep(wait)
 
                 continue
 
-            print(f"HTTP Error {response.status_code}")
+
 
             return {"Products": []}
 
         except Exception as e:
             API_STATS["connected"] = False
-
-            print(e)
 
             return {"Products": []}
 
@@ -314,17 +310,12 @@ def get_parameter(product, parameter_name):
 
 if __name__ == "__main__":
 
-    print("=" * 70)
-    print("DIGIKEY SEARCH TEST")
-    print("=" * 70)
-
     # ---------------------------------------------------
     # Search
     # ---------------------------------------------------
 
     search_query = "10k resistor 0603"
 
-    print(f"\nSearching for: {search_query}\n")
 
     response = search_keyword(search_query)
 
@@ -334,10 +325,9 @@ if __name__ == "__main__":
 
     products = parse_products(response)
 
-    print(f"\nProducts Parsed : {len(products)}")
 
     if len(products) == 0:
-        print("\nNo Products Found")
+
         exit()
 
     # ---------------------------------------------------
@@ -346,37 +336,12 @@ if __name__ == "__main__":
 
     first = products[0]
 
-    print("\n" + "=" * 70)
-    print("FIRST PRODUCT")
-    print("=" * 70)
 
-    print(f"Manufacturer              : {first['Manufacturer']}")
-    print(f"Manufacturer Part Number  : {first['Manufacturer Part Number']}")
-    print(f"DigiKey Part Number       : {first['DigiKey Part Number']}")
-    print(f"Description               : {first['Description']}")
-    print(f"Price                     : {first['Unit Price']}")
-    print(f"Stock                     : {first['Stock']}")
-
-    print("\nProduct Parameters")
-    print("-" * 70)
-
-    for key, value in first["Parameters"].items():
-        print(f"{key:30} : {value}")
 
     # ---------------------------------------------------
     # Test get_parameter()
     # ---------------------------------------------------
 
-    print("\n" + "=" * 70)
-    print("ATTRIBUTE TEST")
-    print("=" * 70)
-
-    print("Resistance :", get_parameter(first, "Resistance"))
-    print("Tolerance  :", get_parameter(first, "Tolerance"))
-    print("Power      :", get_parameter(first, "Power (Watts)"))
-    print("Package    :", get_parameter(first, "Package / Case"))
-
-    print("\nDone.")
 
 
 def get_api_stats():

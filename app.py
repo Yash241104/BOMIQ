@@ -3,6 +3,8 @@ import time
 
 import streamlit as st
 import pandas as pd
+from datetime import datetime
+from openpyxl.styles import Font
 
 from bom_interpreter import generate_engineering_bom
 from search_engine import search_bom
@@ -12,7 +14,10 @@ from digikey_api import get_api_stats
 
 try:
     from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.platypus import Image
     from reportlab.lib import colors
+    from reportlab.platypus import Table, TableStyle, Image
+    from reportlab.lib.units import inch
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet
     REPORTLAB_AVAILABLE = True
@@ -42,19 +47,30 @@ def generate_pdf_bytes(
 
     elements = []
 
-    elements.append(
-        Paragraph(
-            "<font size=20><b>BOMIQ</b></font>",
-            styles["Title"]
-        )
-    )
 
-    elements.append(
-        Paragraph(
-            "<font size=14><b>Final Procurement BOM Report</b></font>",
-            styles["Heading2"]
-        )
-    )
+    logo = Image("assets/havells.png")
+    logo.drawHeight = 1.302 * inch
+    logo.drawWidth = 2.665 * inch
+
+    header = Table([
+        [
+            Paragraph(
+                "<font size=18><b>Final Procurement Report</b></font>",
+                styles["Heading1"],
+            ),
+            logo,
+        ]
+    ])
+
+    header.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    elements.append(header)
+    elements.append(Spacer(1, 12))
 
     elements.append(Spacer(1, 12))
 
@@ -62,23 +78,19 @@ def generate_pdf_bytes(
     <b>Generated :</b> {datetime.now().strftime('%d %b %Y %I:%M %p')}<br/>
     <b>Distributor :</b> {distributor}<br/>
     <b>Total Components :</b> {dashboard['Total Parts']}<br/>
-    <b>Components Found :</b> {dashboard['Found']}<br/>
-    <b>Partial Matches :</b> {dashboard['Partially Matched']}<br/>
-    <b>Few Parameter Matches :</b> {dashboard['Few Parameters Matched']}<br/>
-    <b>Not Found :</b> {dashboard['Not Found']}<br/>
     <b>Automation :</b> {dashboard['Automation']}%<br/><br/>
     """
     if dashboard.get("Target Cost") is None:
 
         report_info += f"""
-        <b>Final BOM Cost :</b> INR{dashboard['Actual Cost']:,.2f}
+        <b>Final BOM Cost :</b> INR {dashboard['Actual Cost']:,.2f}
         """
 
     else:
 
         report_info += f"""
-        <b>Target Cost :</b> INR{dashboard['Target Cost']:,.2f}<br/>
-        <b>Actual Cost :</b> INR{dashboard['Actual Cost']:,.2f}<br/>
+        <b>Target Cost :</b> INR {dashboard['Target Cost']:,.2f}<br/>
+        <b>Actual Cost :</b> INR {dashboard['Actual Cost']:,.2f}<br/>
         <b>Difference % :</b> {dashboard['Difference %']:.2f}%
         """
 
@@ -113,8 +125,8 @@ def generate_pdf_bytes(
             "Designator": "Ref",
             "Manufacturer Part Number": "Manufacturer PN",
             "DigiKey Part Number": "DigiKey PN",
-            "Unit Price": "Unit Price (INR)",
-            "Total Cost": "Total (INR)",
+            "Unit Price": "Unit Price (INR )",
+            "Total Cost": "Total (INR )",
             "Quantity": "Qty"
         },
         inplace=True
@@ -588,7 +600,7 @@ with st.sidebar:
     currency = st.selectbox(
         "Currency",
         [
-            "INR"
+            "INR "
         ],
         disabled=st.session_state.search_completed
     )
@@ -757,6 +769,7 @@ if uploaded_file is not None:
         engineering_df = generate_engineering_bom(mapped_df)
 
         st.session_state.engineering_bom = engineering_df
+        st.session_state.original_engineering_bom = engineering_df.copy()
 
         st.session_state.search_completed = False
         st.session_state.search_results = None
@@ -775,16 +788,16 @@ if st.session_state.engineering_bom is not None:
 
     section_head("cpu", "Engineering BOM", "Review and edit extracted parameters before searching DigiKey.")
 
+    if "Skip Search" not in st.session_state.engineering_bom.columns:
+        st.session_state.engineering_bom["Skip Search"] = False
+
     edited_df = st.data_editor(
 
         st.session_state.engineering_bom,
-
+        key="engineering_editor",
         hide_index=True,
-
         use_container_width=True,
-
         num_rows="dynamic",
-
         column_config={
 
             "Part Type": st.column_config.SelectboxColumn(
@@ -884,16 +897,52 @@ if st.session_state.engineering_bom is not None:
                     "X7R",
                     "Y5V"
                 ]
+            ),
+
+            "Skip Search": st.column_config.CheckboxColumn(
+                "Skip Search",
+                help="Checked components will not be searched on DigiKey.",
+                default=False
             )
 
         }
+    )
 
+
+    editor_state = st.session_state.get("engineering_editor", {})
+
+    bom_modified = (
+        len(editor_state.get("edited_rows", {})) > 0
+        or len(editor_state.get("added_rows", [])) > 0
+        or len(editor_state.get("deleted_rows", [])) > 0
     )
 
     edited_df = edited_df.fillna("")
     edited_df.reset_index(drop=True, inplace=True)
 
     st.session_state.engineering_bom = edited_df
+
+    st.write("")
+
+    engineering_excel = io.BytesIO()
+
+    with pd.ExcelWriter(engineering_excel, engine="openpyxl") as writer:
+        st.session_state.engineering_bom.to_excel(
+            writer,
+            index=False,
+            sheet_name="Engineering BOM"
+        )
+
+    col1, col2 = st.columns([8, 1])
+
+    with col2:
+        st.download_button(
+            label="💾 Download",
+            data=engineering_excel.getvalue(),
+            file_name=f"Engineering_BOM_{datetime.now():%Y%m%d_%H%M%S}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            disabled=not bom_modified
+        )
 
     section_head(
         "target",
@@ -916,25 +965,10 @@ if st.session_state.engineering_bom is not None:
 
         st.session_state.enable_cost_comparison = True
 
-        rupee_col, input_col = st.columns([0.08, 0.92])
-
-        with rupee_col:
-            st.markdown(
-                """
-                <div style="
-                    margin-top:8px;
-                    font-size:24px;
-                    font-weight:700;
-                    text-align:center;
-                ">
-                INR
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+        rupee_col, input_col = st.columns([0.01, 0.99])
 
         with input_col:
-
+            st.caption("💡 Press **Enter** after typing the target BOM cost.")
             target_cost_text = st.text_input(
                 "Target BOM Cost",
                 value=(
@@ -942,7 +976,6 @@ if st.session_state.engineering_bom is not None:
                     if st.session_state.target_cost is None
                     else str(st.session_state.target_cost)
                 ),
-                placeholder="Enter target BOM cost",
                 label_visibility="collapsed",
                 disabled=st.session_state.search_completed
             )
@@ -953,7 +986,7 @@ if st.session_state.engineering_bom is not None:
 
                 clean_value = (
                     target_cost_text
-                    .replace("INR", "")
+                    .replace("INR ", "")
                     .replace(",", "")
                     .strip()
                 )
@@ -1087,7 +1120,7 @@ if st.session_state.search_results is not None:
                 kpi_card(
                     "target",
                     "Target Cost",
-                    f"INR{dashboard['Target Cost']:,.2f}",
+                    f"INR {dashboard['Target Cost']:,.2f}",
                     "blue"
                 )
             )
@@ -1097,7 +1130,7 @@ if st.session_state.search_results is not None:
                 kpi_card(
                     "chart",
                     "Actual Cost",
-                    f"INR{dashboard['Actual Cost']:,.2f}",
+                    f"INR {dashboard['Actual Cost']:,.2f}",
                     "emerald"
                 )
             )
@@ -1114,7 +1147,7 @@ if st.session_state.search_results is not None:
                 kpi_card(
                     "chart",
                     "Difference",
-                    f"INR{dashboard['Difference']:,.2f}",
+                    f"INR {dashboard['Difference']:,.2f}",
                     diff_accent
                 )
             )
@@ -1135,7 +1168,7 @@ if st.session_state.search_results is not None:
             kpi_card(
                 "money",
                 "Final BOM Cost",
-                f"INR{dashboard['Actual Cost']:,.2f}",
+                f"INR {dashboard['Actual Cost']:,.2f}",
                 "emerald"
             )
         )
@@ -1188,8 +1221,8 @@ if st.session_state.search_results is not None:
         render_html(
             kpi_card(
                 "x",
-                "Not Found",
-                dashboard["Not Found"],
+                "Not Found / Skipped",
+                dashboard["Not Found / Skipped"],
                 "red"
             )
         )
@@ -1343,6 +1376,9 @@ if st.session_state.search_results is not None:
 
             elif status == "Few Parameters Matched":
                 return "🟠 Few Parameters Matched"
+            
+            elif status == "Skipped":
+                return "⚪ Skipped"
 
             else:
                 return "🔴 Not Found"
@@ -1355,7 +1391,7 @@ if st.session_state.search_results is not None:
     # Price Formatting
     # --------------------------------------------------
 
-    USD_TO_INR = 95.38  # Make configurable later
+    USD_TO_INR  = 95.38  # Make configurable later
 
     summary_df["Unit Price"] = pd.to_numeric(
         summary_df["Unit Price"],
@@ -1363,7 +1399,7 @@ if st.session_state.search_results is not None:
     )
 
     summary_df["Unit Price"] = summary_df["Unit Price"].apply(
-        lambda x: f"INR{x * USD_TO_INR:,.2f}" if pd.notna(x) else ""
+        lambda x: f"INR {x * USD_TO_INR :,.2f}" if pd.notna(x) else ""
     )
 
     # --------------------------------------------------
@@ -1375,15 +1411,24 @@ if st.session_state.search_results is not None:
 
     if "Validation Score" in display_df.columns:
 
-        display_df["Validation Score"] = (
-            pd.to_numeric(
-                display_df["Validation Score"],
+        def format_validation_score(row):
+
+            if row["Status"] == "Skipped":
+                return "—"
+
+            score = pd.to_numeric(
+                row["Validation Score"],
                 errors="coerce"
             )
-            .fillna(0)
-            .astype(int)
-            .astype(str)
-            + "%"
+
+            if pd.isna(score):
+                score = 0
+
+            return f"{int(score)}%"
+
+        display_df["Validation Score"] = display_df.apply(
+            format_validation_score,
+            axis=1
         )
 
     st.dataframe(
@@ -1393,18 +1438,6 @@ if st.session_state.search_results is not None:
         height=450
     )
 
-    # st.dataframe(
-
-    #     summary_df,
-
-    #     use_container_width=True,
-
-    #     hide_index=True,
-
-    #     height=450
-
-    # )
-
     section_head("alert", "Review Required", "Components that need manual attention before final approval.")
 
     details_df = st.session_state.search_results["details"]
@@ -1412,6 +1445,10 @@ if st.session_state.search_results is not None:
     reviewed_any = False
 
     for _, row in details_df.iterrows():
+
+        # Don't review intentionally skipped parts
+        if row["Status"] == "Skipped":
+            continue
 
         if row["Validation Score"] == 100:
             continue
@@ -1438,13 +1475,20 @@ if st.session_state.search_results is not None:
 
             matched = row["Matched"]
 
-            if matched:
+            if row.get("Status") == "Skipped":
+                st.write("Skipped")
+
+            elif pd.notna(matched) and str(matched).strip():
+
                 chips = "".join(
                     f'<span class="chip chip-match">✔ {item.strip()}</span>'
-                    for item in matched.split(",")
+                    for item in str(matched).split(",")
                 )
+
                 render_html(chips)
+
             else:
+
                 st.write("None")
 
             st.write("")
@@ -1452,12 +1496,18 @@ if st.session_state.search_results is not None:
 
             mismatched = row["Mismatched"]
 
-            if mismatched:
+            if row.get("Status") == "Skipped":
+                st.write("Skipped")
+
+            elif pd.notna(mismatched) and str(mismatched).strip():
+
                 chips = "".join(
                     f'<span class="chip chip-mismatch">✖ {item.strip()}</span>'
-                    for item in mismatched.split(",")
+                    for item in str(mismatched).split(",")
                 )
+
                 render_html(chips)
+
             else:
                 st.write("None")
 
@@ -1483,20 +1533,102 @@ if st.session_state.search_results is not None:
     # DOWNLOAD
     # ==========================================================
 
-    section_head("download", "Export", "Download the final validated BOM in your preferred format.")
+    section_head(
+    "download",
+    "Export",
+    "Download the final validated BOM in your preferred format."
+    )
 
     csv_data = details_df.to_csv(index=False).encode("utf-8")
 
     excel_buffer = io.BytesIO()
+
     with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
-        details_df.to_excel(writer, index=False, sheet_name="Final BOM")
+
+        # --------------------------------------------------
+        # Export only useful columns
+        # --------------------------------------------------
+
+        export_columns = [
+            "Designator",
+            "Quantity",
+            "Part Type",
+            "Value",
+            "Manufacturer",
+            "Manufacturer Part Number",
+            "DigiKey Part Number",
+            "Description",
+            "Stock",
+            "Unit Price",
+            "Total Cost",
+            "Product URL",
+            "Datasheet",
+            "Status"
+        ]
+
+        export_df = details_df[
+            [c for c in export_columns if c in details_df.columns]
+        ].copy()
+
+        export_df.to_excel(
+            writer,
+            index=False,
+            sheet_name="Final BOM"
+        )
+
+        worksheet = writer.sheets["Final BOM"]
+
+        # --------------------------------------------------
+        # Product hyperlink
+        # --------------------------------------------------
+
+        if "Product URL" in export_df.columns:
+
+            product_col = export_df.columns.get_loc("Product URL") + 1
+
+            for row in range(2, len(export_df) + 2):
+
+                url = export_df.iloc[row - 2]["Product URL"]
+
+                if pd.notna(url) and str(url).strip():
+
+                    cell = worksheet.cell(row=row, column=product_col)
+
+                    cell.value = "Open Product"
+
+                    cell.hyperlink = str(url)
+
+                    cell.style = "Hyperlink"
+
+        # --------------------------------------------------
+        # Datasheet hyperlink
+        # --------------------------------------------------
+
+        if "Datasheet" in export_df.columns:
+
+            datasheet_col = export_df.columns.get_loc("Datasheet") + 1
+
+            for row in range(2, len(export_df) + 2):
+
+                url = export_df.iloc[row - 2]["Datasheet"]
+
+                if pd.notna(url) and str(url).strip():
+
+                    cell = worksheet.cell(row=row, column=datasheet_col)
+
+                    cell.value = "Datasheet"
+
+                    cell.hyperlink = str(url)
+
+                    cell.style = "Hyperlink"
+
     excel_data = excel_buffer.getvalue()
 
     exp1, exp2, exp3 = st.columns(3)
 
     with exp1:
         st.download_button(
-            label="📄  CSV",
+            label="📄 CSV",
             data=csv_data,
             file_name="Final_BOM.csv",
             mime="text/csv",
@@ -1505,7 +1637,7 @@ if st.session_state.search_results is not None:
 
     with exp2:
         st.download_button(
-            label="📊  Excel",
+            label="📊 Excel",
             data=excel_data,
             file_name="Final_BOM.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1524,7 +1656,7 @@ if st.session_state.search_results is not None:
             )
 
             st.download_button(
-                label="🧾  PDF",
+                label="🧾 PDF",
                 data=pdf_data,
                 file_name="Final_BOM.pdf",
                 mime="application/pdf",
@@ -1542,7 +1674,6 @@ if st.session_state.search_results is not None:
             st.caption(
                 "Run `pip install reportlab` to enable PDF export."
             )
-
     # ==========================================================
     # SEARCH STATISTICS
     # ==========================================================
