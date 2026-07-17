@@ -1,10 +1,10 @@
 import io
 import time
-
+import hashlib
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from openpyxl.styles import Font
+from openpyxl.styles import Font, PatternFill
 
 from bom_interpreter import generate_engineering_bom
 from search_engine import search_bom
@@ -120,6 +120,28 @@ def generate_pdf_bytes(
         [c for c in pdf_columns if c in df.columns]
     ].copy()
 
+    USD_TO_INR = 95.38
+
+    if "Unit Price" in pdf_df.columns:
+        pdf_df["Unit Price"] = (
+            pd.to_numeric(pdf_df["Unit Price"], errors="coerce")
+            * USD_TO_INR
+        )
+
+    if "Total Cost" in pdf_df.columns:
+
+        pdf_df["Total Cost"] = (
+            pd.to_numeric(pdf_df["Total Cost"], errors="coerce")
+            * USD_TO_INR
+        )
+        pdf_df["Unit Price"] = pdf_df["Unit Price"].apply(
+            lambda x: f"INR {x:,.2f}" if pd.notna(x) else ""
+        )
+
+        pdf_df["Total Cost"] = pdf_df["Total Cost"].apply(
+            lambda x: f"INR {x:,.2f}" if pd.notna(x) else ""
+        )
+
     pdf_df.rename(
         columns={
             "Designator": "Ref",
@@ -167,23 +189,58 @@ def generate_pdf_bytes(
         page_width * 0.04    # Total
     ]
 
+    # Identify skipped rows
+    skipped_rows = []
+
+    if "Skip Search" in df.columns:
+
+        skipped_rows = (
+            df["Skip Search"]
+            .fillna(False)
+            .tolist()
+        )
     table = Table(
         table_data,
         repeatRows=1,
         colWidths=col_widths
     )
-    table.setStyle(TableStyle([
+
+    style = TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3B82F6")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+
         ("FONTSIZE", (0,0), (-1,-1), 5.8),
+
         ("BOTTOMPADDING", (0,0), (-1,-1), 2),
         ("TOPPADDING", (0,0), (-1,-1), 2),
         ("LEFTPADDING", (0,0), (-1,-1), 2),
         ("RIGHTPADDING", (0,0), (-1,-1), 2),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CCCCCC")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F1F5F9")]),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]))
+
+        ("GRID", (0,0), (-1,-1), 0.4, colors.HexColor("#CCCCCC")),
+
+        ("ROWBACKGROUNDS",
+            (0,1),
+            (-1,-1),
+            [
+                colors.white,
+                colors.HexColor("#F1F5F9")
+            ]
+        ),
+
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+    ])
+
+    for i, skipped in enumerate(skipped_rows, start=1):
+
+        if skipped:
+
+            style.add(
+                "BACKGROUND",
+                (0, i),
+                (-1, i),
+                colors.HexColor("#FDE2E1")
+            )
+    table.setStyle(style)
     elements.append(table)
     doc.build(elements)
     buffer.seek(0)
@@ -757,9 +814,11 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
 
+    file_hash = hashlib.md5(uploaded_file.getvalue()).hexdigest()
+
     if (
-        "last_uploaded_file" not in st.session_state
-        or st.session_state.last_uploaded_file != uploaded_file.name
+        "last_uploaded_hash" not in st.session_state
+        or st.session_state.last_uploaded_hash != file_hash
     ):
 
         raw_df = pd.read_excel(uploaded_file)
@@ -771,12 +830,16 @@ if uploaded_file is not None:
         st.session_state.engineering_bom = engineering_df
         st.session_state.original_engineering_bom = engineering_df.copy()
 
-        st.session_state.search_completed = False
+        # Clear previous search results
         st.session_state.search_results = None
+        st.session_state.search_completed = False
         st.session_state.search_duration = None
 
-        st.session_state.last_uploaded_file = uploaded_file.name
+        # Reset cost comparison
+        st.session_state.target_cost = None
+        st.session_state.enable_cost_comparison = False
 
+        st.session_state.last_uploaded_hash = file_hash
 
     st.success(f"✅ **{uploaded_file.name}** processed successfully — Engineering BOM generated.")
 
@@ -798,6 +861,20 @@ if st.session_state.engineering_bom is not None:
         hide_index=True,
         use_container_width=True,
         num_rows="dynamic",
+        column_order=[
+            "Skip Search",
+            "Designator",
+            "Quantity",
+            "Part Type",
+            "Value",
+            "Package",
+            "Tolerance",
+            "Power Rating",
+            "Voltage Rating",
+            "Current Rating",
+            "Dielectric",
+            "Remarks",
+        ],
         column_config={
 
             "Part Type": st.column_config.SelectboxColumn(
@@ -911,10 +988,14 @@ if st.session_state.engineering_bom is not None:
 
     editor_state = st.session_state.get("engineering_editor", {})
 
+    edited_rows = editor_state.get("edited_rows", {})
+    added_rows = editor_state.get("added_rows", [])
+    deleted_rows = editor_state.get("deleted_rows", [])
+
     bom_modified = (
-        len(editor_state.get("edited_rows", {})) > 0
-        or len(editor_state.get("added_rows", [])) > 0
-        or len(editor_state.get("deleted_rows", [])) > 0
+        len(edited_rows) > 0
+        or len(added_rows) > 0
+        or len(deleted_rows) > 0
     )
 
     edited_df = edited_df.fillna("")
@@ -927,11 +1008,39 @@ if st.session_state.engineering_bom is not None:
     engineering_excel = io.BytesIO()
 
     with pd.ExcelWriter(engineering_excel, engine="openpyxl") as writer:
-        st.session_state.engineering_bom.to_excel(
+        export_df = st.session_state.engineering_bom.copy()
+
+        # Remember which rows are skipped
+        skipped_rows = export_df["Skip Search"].fillna(False)
+
+        # Remove helper column
+        export_df = export_df.drop(
+            columns=["Skip Search"],
+            errors="ignore"
+        )
+
+        export_df.to_excel(
             writer,
             index=False,
             sheet_name="Engineering BOM"
         )
+
+        worksheet = writer.sheets["Engineering BOM"]
+        skip_fill = PatternFill(
+            fill_type="solid",
+            start_color="FDE2E1",
+            end_color="FDE2E1"
+        )
+        for row, skipped in enumerate(skipped_rows, start=2):
+
+            if skipped:
+
+                for col in range(1, len(export_df.columns) + 1):
+
+                    worksheet.cell(
+                        row=row,
+                        column=col
+                    ).fill = skip_fill
 
     col1, col2 = st.columns([8, 1])
 
@@ -991,7 +1100,13 @@ if st.session_state.engineering_bom is not None:
                     .strip()
                 )
 
-                st.session_state.target_cost = float(clean_value)
+                target_cost = float(clean_value)
+
+                if target_cost > 100000000:
+                    st.error("Target BOM Cost cannot exceed ₹10 Crore.")
+                    st.stop()
+
+                st.session_state.target_cost = target_cost
 
             except ValueError:
 
@@ -1570,6 +1685,20 @@ if st.session_state.search_results is not None:
             [c for c in export_columns if c in details_df.columns]
         ].copy()
 
+        USD_TO_INR = 95.38
+
+        if "Unit Price" in export_df.columns:
+            export_df["Unit Price"] = (
+                pd.to_numeric(export_df["Unit Price"], errors="coerce")
+                * USD_TO_INR
+            )
+
+        if "Total Cost" in export_df.columns:
+            export_df["Total Cost"] = (
+                pd.to_numeric(export_df["Total Cost"], errors="coerce")
+                * USD_TO_INR
+            )
+
         export_df.to_excel(
             writer,
             index=False,
@@ -1621,6 +1750,27 @@ if st.session_state.search_results is not None:
                     cell.hyperlink = str(url)
 
                     cell.style = "Hyperlink"
+
+        start_row = len(export_df) + 3
+
+        worksheet.cell(start_row, 1).value = "Final BOM Cost"
+        worksheet.cell(start_row, 2).value = dashboard["Actual Cost"]
+
+        worksheet.cell(start_row, 1).font = Font(bold=True)
+
+        if dashboard.get("Target Cost") is not None:
+
+            worksheet.cell(start_row + 1, 1).value = "Target BOM Cost"
+            worksheet.cell(start_row + 1, 2).value = dashboard["Target Cost"]
+
+            worksheet.cell(start_row + 2, 1).value = "Difference"
+            worksheet.cell(start_row + 2, 2).value = dashboard["Difference"]
+
+            worksheet.cell(start_row + 3, 1).value = "Difference %"
+            worksheet.cell(start_row + 3, 2).value = f'{dashboard["Difference %"]:.2f}%'
+
+            for r in range(start_row + 1, start_row + 4):
+                worksheet.cell(r, 1).font = Font(bold=True)
 
     excel_data = excel_buffer.getvalue()
 
